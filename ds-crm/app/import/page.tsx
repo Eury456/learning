@@ -147,6 +147,7 @@ export default function ImportPage() {
   const [isGmail, setIsGmail] = useState(false);
   const [status, setStatus] = useState<"idle" | "preview" | "importing" | "done" | "error">("idle");
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
   const fileRef = useRef<HTMLInputElement>(null);
 
   const config = CONFIG[activeTab];
@@ -173,18 +174,32 @@ export default function ImportPage() {
 
   const handleImport = async () => {
     setStatus("importing");
+    const BATCH = 100;
+    const totalBatches = Math.ceil(rows.length / BATCH);
+    setProgress({ current: 0, total: rows.length });
+
+    const combined: ImportResult = { imported: 0, skipped: 0, errors: [] };
+
     try {
-      const res = await fetch(`/api/import/${activeTab}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
-      });
-      const data = await res.json();
-      setResult(data);
-      setStatus(data.error ? "error" : "done");
-    } catch {
+      for (let i = 0; i < totalBatches; i++) {
+        const batch = rows.slice(i * BATCH, (i + 1) * BATCH);
+        const res = await fetch(`/api/import/${activeTab}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: batch }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        combined.imported += data.imported ?? 0;
+        combined.skipped = (combined.skipped ?? 0) + (data.skipped ?? 0);
+        combined.errors = [...(combined.errors ?? []), ...(data.errors ?? [])];
+        setProgress({ current: Math.min((i + 1) * BATCH, rows.length), total: rows.length });
+      }
+      setResult(combined);
+      setStatus("done");
+    } catch (err) {
       setStatus("error");
-      setResult({ imported: 0, errors: ["Network error — please try again"] });
+      setResult({ imported: combined.imported, errors: [err instanceof Error ? err.message : "Network error — please try again"] });
     }
   };
 
@@ -194,6 +209,7 @@ export default function ImportPage() {
     setIsGmail(false);
     setStatus("idle");
     setResult(null);
+    setProgress({ current: 0, total: 0 });
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -334,8 +350,16 @@ export default function ImportPage() {
           <Card>
             <CardContent className="p-8 text-center">
               <div className="animate-spin h-8 w-8 border-2 border-slate-900 border-t-transparent rounded-full mx-auto mb-3" />
-              <p className="text-sm font-medium text-slate-700">Importing {rows.length} {config.label}...</p>
-              <p className="text-xs text-slate-400 mt-1">This may take a moment for large files</p>
+              <p className="text-sm font-medium text-slate-700">
+                Importing {config.label}... {progress.current} / {progress.total}
+              </p>
+              <div className="mt-3 h-2 w-full rounded-full bg-slate-100">
+                <div
+                  className="h-2 rounded-full bg-slate-900 transition-all duration-300"
+                  style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%` }}
+                />
+              </div>
+              <p className="text-xs text-slate-400 mt-2">Do not close this tab</p>
             </CardContent>
           </Card>
         )}
