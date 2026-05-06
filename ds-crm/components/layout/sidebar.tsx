@@ -4,6 +4,8 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Users,
+  Building,
+  MapPin,
   Briefcase,
   Activity,
   CheckSquare,
@@ -15,14 +17,16 @@ import {
 import { cn } from "@/lib/utils";
 
 const nav = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard },
-  { label: "Contacts", href: "/contacts", icon: Users },
-  { label: "Matters", href: "/matters", icon: Briefcase },
-  { label: "Activities", href: "/activities", icon: Activity },
-  { label: "Tasks", href: "/tasks", icon: CheckSquare },
-  { label: "Revenue", href: "/revenue", icon: DollarSign },
+  { label: "Dashboard",   href: "/",           icon: LayoutDashboard },
+  { label: "Contacts",    href: "/contacts",    icon: Users },
+  { label: "Companies",   href: "/companies",   icon: Building },
+  { label: "Projects",    href: "/projects",    icon: MapPin },
+  { label: "Matters",     href: "/matters",     icon: Briefcase },
+  { label: "Activities",  href: "/activities",  icon: Activity },
+  { label: "Tasks",       href: "/tasks",       icon: CheckSquare },
+  { label: "Revenue",     href: "/revenue",     icon: DollarSign },
   { label: "Collections", href: "/collections", icon: ClipboardList },
-  { label: "Import Data", href: "/import", icon: Upload },
+  { label: "Import Data", href: "/import",      icon: Upload },
 ];
 
 export function Sidebar() {
@@ -38,7 +42,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-0.5 p-3">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
         {nav.map(({ label, href, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
