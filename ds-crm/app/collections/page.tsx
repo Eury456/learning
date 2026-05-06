@@ -151,6 +151,48 @@ const bucketColor: Record<string, string> = {
   "0-27":    "bg-slate-100 text-slate-600",
 };
 
+// ── Parse Tabs3 combined format ───────────────────────────────────────────────
+// Handles both new format (separate fields) and old format where the full
+// Tabs3 header "16774.0004 S Richmond SI Owners, LLC." ended up in client_name.
+
+interface ParsedARItem {
+  matterNum: string | null;
+  clientName: string;
+  description: string | null;
+}
+
+function parsedItem(item: ARItem): ParsedARItem {
+  const raw = item.client_name ?? "";
+
+  // Tabs3 combined pattern: "16774.0004 S Richmond SI Owners, LLC."
+  // Matter number + optional letter + one-letter billing code + client name
+  const combined = raw.match(/^(\d+\.\d+)[A-Za-z]?\s+[A-Za-z]\s+(.+)/);
+  if (combined) {
+    return {
+      matterNum: item.matter_number ?? combined[1],
+      clientName: combined[2].replace(/\.?\s*$/, "").trim(),
+      description: item.matter_description,
+    };
+  }
+
+  // Just a bare matter number stored in client_name (very old format)
+  const bareNum = raw.match(/^(\d+\.\d+[A-Za-z]?)\s*$/);
+  if (bareNum) {
+    return {
+      matterNum: item.matter_number ?? bareNum[1],
+      clientName: "",
+      description: item.matter_description,
+    };
+  }
+
+  // Clean format: client_name is already the real name
+  return {
+    matterNum: item.matter_number,
+    clientName: raw,
+    description: item.matter_description,
+  };
+}
+
 function applySort(items: ARItem[], sort: string): ARItem[] {
   return [...items].sort((a, b) => {
     switch (sort) {
@@ -158,8 +200,8 @@ function applySort(items: ARItem[], sort: string): ARItem[] {
       case "amount_asc":   return a.balance_due - b.balance_due;
       case "oldest":       return agingScore(b) - agingScore(a) || b.balance_due - a.balance_due;
       case "newest":       return agingScore(a) - agingScore(b) || b.balance_due - a.balance_due;
-      case "client_az":    return a.client_name.localeCompare(b.client_name);
-      case "client_za":    return b.client_name.localeCompare(a.client_name);
+      case "client_az":    return parsedItem(a).clientName.localeCompare(parsedItem(b).clientName);
+      case "client_za":    return parsedItem(b).clientName.localeCompare(parsedItem(a).clientName);
       case "followup": {
         const fa = a.next_followup ? new Date(a.next_followup).getTime() : Infinity;
         const fb = b.next_followup ? new Date(b.next_followup).getTime() : Infinity;
@@ -542,26 +584,33 @@ export default function CollectionsPage() {
                   const priority = priorityLevel(item);
                   const bucket = agingBucket(item);
                   const isSelected = selected?.id === item.id;
+                  const { matterNum, clientName, description } = parsedItem(item);
                   return (
                     <Card key={item.id}
                       className={`cursor-pointer transition-all ${priorityBorder[priority]} ${isSelected ? "ring-2 ring-slate-900 bg-slate-50" : "hover:shadow-md"}`}
                       onClick={() => selectItem(item)}>
-                      <CardContent className="p-3">
-                        {/* Matter number — small and secondary */}
-                        {item.matter_number && (
-                          <p className="text-[10px] text-slate-400 font-mono mb-0.5">{item.matter_number}</p>
+                      <CardContent className="p-3 space-y-0.5">
+                        {/* Row 1: matter number */}
+                        {matterNum && (
+                          <p className="text-[10px] text-slate-400 font-mono">{matterNum}</p>
                         )}
-                        {/* Client name — primary, large */}
+                        {/* Row 2: client name — biggest, boldest */}
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-bold text-slate-900 leading-tight">{item.client_name}</p>
+                          <p className="text-sm font-bold text-slate-900 leading-snug">
+                            {clientName || <span className="text-slate-400 italic">Unknown client</span>}
+                          </p>
                           <ChevronRight className="h-4 w-4 text-slate-300 shrink-0 mt-0.5" />
                         </div>
-                        {/* Matter description / property address */}
-                        {item.matter_description && (
-                          <p className="text-xs text-slate-500 italic mt-0.5 line-clamp-2">{item.matter_description}</p>
+                        {/* Row 3: property address + matter type (from description) */}
+                        {description ? (
+                          <p className="text-[11px] text-blue-700 font-medium leading-snug line-clamp-2">
+                            {description.replace(/^re:\s*/i, "")}
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-slate-300 italic">No description</p>
                         )}
-                        {/* Status + aging + amount */}
-                        <div className="mt-2 flex items-center justify-between">
+                        {/* Row 4: status + aging + balance */}
+                        <div className="pt-1 flex items-center justify-between">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <Badge variant={statusVariant[item.status] ?? "secondary"} className="text-[10px] capitalize">{item.status}</Badge>
                             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${bucketColor[bucket] ?? "bg-slate-100 text-slate-600"}`}>
@@ -576,7 +625,7 @@ export default function CollectionsPage() {
                           <p className="text-sm font-bold text-slate-900">{formatCurrency(item.balance_due)}</p>
                         </div>
                         {item.next_followup && (
-                          <p className={`mt-1 text-[10px] flex items-center gap-1 ${new Date(item.next_followup) <= new Date() ? "text-red-600 font-semibold" : "text-slate-400"}`}>
+                          <p className={`text-[10px] flex items-center gap-1 ${new Date(item.next_followup) <= new Date() ? "text-red-600 font-semibold" : "text-slate-400"}`}>
                             <Calendar className="h-3 w-3" />
                             Follow up: {formatDate(item.next_followup)}
                           </p>
@@ -600,16 +649,26 @@ export default function CollectionsPage() {
             ) : (
               <div className="space-y-3">
                 {/* Matter Header Card */}
+                {(() => {
+                  const { matterNum, clientName, description } = parsedItem(selected);
+                  return (
                 <Card>
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        {selected.matter_number && (
-                          <p className="text-xs text-slate-400 font-mono mb-0.5">{selected.matter_number}</p>
+                        {/* Matter number */}
+                        {matterNum && (
+                          <p className="text-xs text-slate-400 font-mono mb-1">{matterNum}</p>
                         )}
-                        <p className="text-xl font-bold text-slate-900 leading-tight">{selected.client_name}</p>
-                        {selected.matter_description && (
-                          <p className="text-sm text-slate-600 italic mt-0.5">{selected.matter_description}</p>
+                        {/* Client name — primary */}
+                        <p className="text-xl font-bold text-slate-900 leading-tight">
+                          {clientName || <span className="text-slate-400 italic text-base">Unknown client</span>}
+                        </p>
+                        {/* Property address + matter type */}
+                        {description && (
+                          <p className="text-sm font-medium text-blue-700 mt-1">
+                            {description.replace(/^re:\s*/i, "")}
+                          </p>
                         )}
                       </div>
                       <div className="flex gap-2 shrink-0">
@@ -657,6 +716,8 @@ export default function CollectionsPage() {
                     </div>
                   </CardContent>
                 </Card>
+                  );
+                })()}
 
                 {/* Tabs: Overview | Invoices | Contact */}
                 <div className="flex gap-1 border-b">
