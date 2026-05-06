@@ -9,12 +9,24 @@ export async function PATCH(
   const supabase = getServiceClient() as any;
   const { id } = await params;
   const body = await request.json();
-  const { data, error } = await supabase
+
+  // Attempt with contact join; fall back if FK doesn't exist yet.
+  let { data, error } = await supabase
     .from("ar_items")
     .update({ ...body, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select("*, contact:contacts(id,name,email,phone)")
     .single();
+
+  if (error) {
+    ({ data, error } = await supabase
+      .from("ar_items")
+      .update({ ...body, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("*")
+      .single());
+  }
+
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json(data);
 }

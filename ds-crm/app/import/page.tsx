@@ -317,14 +317,16 @@ export default function ImportPage() {
               <p className="text-xs text-slate-500 mt-0.5">{config.description}</p>
               <p className="text-xs text-slate-400 mt-1">{config.typeNote}</p>
             </div>
-            <a
-              href={config.template}
-              download
-              className="flex items-center gap-1.5 shrink-0 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Template
-            </a>
+            {config.template && (
+              <a
+                href={config.template}
+                download
+                className="flex items-center gap-1.5 shrink-0 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Template
+              </a>
+            )}
           </CardContent>
         </Card>
 
@@ -401,6 +403,22 @@ export default function ImportPage() {
               <Button variant="outline" onClick={reset}>Cancel</Button>
             </div>
           </div>
+        )}
+
+        {/* Empty state — file was read but no rows parsed */}
+        {status === "preview" && activeTab !== "ar_detail" && rows.length === 0 && (
+          <Card>
+            <CardContent className="p-8 text-center space-y-3">
+              <AlertCircle className="h-8 w-8 text-amber-400 mx-auto" />
+              <p className="text-sm font-semibold text-slate-700">No rows found in &quot;{fileName}&quot;</p>
+              <p className="text-xs text-slate-400">
+                {activeTab === "ar"
+                  ? "Make sure you are uploading the Tabs3 AR Aging report (not the detail/ledger report). The AR Detail report belongs on the AR Detail tab."
+                  : "Check that the file uses the correct columns and matches the template format."}
+              </p>
+              <Button onClick={reset} variant="outline" size="sm">Try Another File</Button>
+            </CardContent>
+          </Card>
         )}
 
         {/* Preview — standard CSV tabs */}

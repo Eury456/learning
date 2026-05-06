@@ -8,19 +8,33 @@ export async function GET(request: NextRequest) {
   const status = searchParams.get("status");
   const search = searchParams.get("search");
 
-  let query = supabase
-    .from("ar_items")
-    .select("*, contact:contacts(id,name,email,phone)")
-    .order("balance_due", { ascending: false });
+  const addFilters = (q: ReturnType<typeof supabase.from>) => {
+    if (status) q = q.eq("status", status);
+    if (search)
+      q = q.or(
+        `client_name.ilike.%${search}%,matter_number.ilike.%${search}%,matter_description.ilike.%${search}%`
+      );
+    return q;
+  };
 
-  if (status) query = query.eq("status", status);
-  if (search) {
-    query = query.or(
-      `client_name.ilike.%${search}%,matter_number.ilike.%${search}%,matter_description.ilike.%${search}%`
-    );
+  // Attempt to join contact — requires schema migration (ar-detail-schema.sql).
+  // Falls back to plain select if the FK doesn't exist yet.
+  let { data, error } = await addFilters(
+    supabase
+      .from("ar_items")
+      .select("*, contact:contacts(id,name,email,phone)")
+      .order("balance_due", { ascending: false })
+  );
+
+  if (error) {
+    ({ data, error } = await addFilters(
+      supabase
+        .from("ar_items")
+        .select("*")
+        .order("balance_due", { ascending: false })
+    ));
   }
 
-  const { data, error } = await query;
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json(data);
 }
