@@ -20,6 +20,7 @@ interface ImportResult {
   errors?: string[];
   updated?: number;
   resolved?: number;
+  contacts_created?: number;
 }
 
 const CONFIG: Record<ImportType, {
@@ -237,7 +238,7 @@ export default function ImportPage() {
     const totalBatches = Math.ceil(rows.length / BATCH);
     setProgress({ current: 0, total: rows.length });
 
-    const combined: ImportResult = { imported: 0, skipped: 0, errors: [], updated: 0, resolved: 0 };
+    const combined: ImportResult = { imported: 0, skipped: 0, errors: [], updated: 0, resolved: 0, contacts_created: 0 };
 
     try {
       for (let i = 0; i < totalBatches; i++) {
@@ -257,6 +258,7 @@ export default function ImportPage() {
         combined.errors = [...(combined.errors ?? []), ...(data.errors ?? [])];
         combined.updated = (combined.updated ?? 0) + (data.updated ?? 0);
         combined.resolved = (combined.resolved ?? 0) + (data.resolved ?? 0);
+        combined.contacts_created = (combined.contacts_created ?? 0) + (data.contacts_created ?? 0);
         setProgress({ current: Math.min((i + 1) * BATCH, rows.length), total: rows.length });
       }
       setResult(combined);
@@ -524,6 +526,14 @@ export default function ImportPage() {
                   </p>
                 </div>
               </div>
+
+              {activeTab === "matters" && (result.contacts_created ?? 0) > 0 && (
+                <div className="rounded-lg bg-blue-50 border border-blue-100 p-3">
+                  <p className="text-xs font-semibold text-blue-700">
+                    &#10003; {result.contacts_created} new contact{result.contacts_created !== 1 ? "s" : ""} auto-created from client names not yet in your Contacts list. Review them in the Contacts page to add email, phone, and other details.
+                  </p>
+                </div>
+              )}
 
               {activeTab === "ar" && (result.resolved ?? 0) > 0 && (
                 <div className="rounded-lg bg-green-50 border border-green-100 p-3">
