@@ -97,7 +97,7 @@ function convertGmailRow(row: ParsedRow): ParsedRow {
   return { name, company: row["organization name"]?.trim() ?? "", title: row["organization title"]?.trim() ?? "", type, email, phone, linkedin: "", birthday, notes };
 }
 
-function parseCSV(text: string): { rows: ParsedRow[]; isGmail: boolean } {
+function parseCSV(text: string, skipNameFilter = false): { rows: ParsedRow[]; isGmail: boolean } {
   if (text.trim().length < 2) return { rows: [], isGmail: false };
 
   const delimiter = text.split("\n")[0].includes("\t") ? "\t" : ",";
@@ -143,6 +143,7 @@ function parseCSV(text: string): { rows: ParsedRow[]; isGmail: boolean } {
     const raw = headers.reduce((obj, h, i) => ({ ...obj, [h]: values[i] ?? "" }), {} as ParsedRow);
     return gmail ? convertGmailRow(raw) : raw;
   }).filter(row => {
+    if (skipNameFilter) return true;
     const name = row.name || row["name"] || "";
     return name.length > 1 && !name.match(/^\d+\s/) && !name.match(/^new york/i);
   });
@@ -171,7 +172,7 @@ export default function ImportPage() {
     setResult(null);
     const reader = new FileReader();
     reader.onload = (e) => {
-      const { rows: parsed, isGmail: gmail } = parseCSV(e.target?.result as string);
+      const { rows: parsed, isGmail: gmail } = parseCSV(e.target?.result as string, activeTab === "ar");
       setRows(parsed);
       setIsGmail(gmail);
       setStatus("preview");
