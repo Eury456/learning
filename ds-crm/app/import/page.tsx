@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Upload, Download, CheckCircle, AlertCircle, FileText, X } from "lucide-react";
 
-type ImportType = "contacts" | "matters" | "invoices" | "ar";
+type ImportType = "contacts" | "matters" | "invoices" | "ar" | "ar_detail";
 
 interface ParsedRow {
   [key: string]: string;
@@ -59,6 +59,14 @@ const CONFIG: Record<ImportType, {
     requiredColumns: ["client_name","balance_due"],
     columns: ["matter_number","client_name","matter_description","days_0_27","days_28_60","days_61_90","days_91_120","days_121_180","days_181_plus","balance_due","report_date"],
     typeNote: "balance_due must be > 0 to be imported; report_date defaults to today if blank",
+  },
+  ar_detail: {
+    label: "AR Detail",
+    description: "Import individual invoice lines from the Tabs3 A/R Detail (Client Ledger) report. Import the AR aging summary first — this matches to those existing records.",
+    template: "",
+    requiredColumns: [],
+    columns: [],
+    typeNote: "Columns detected automatically: Date, Fees, Expenses, Advances, Fin Chg, Total (Billed + Due), Ref #, Stmt #",
   },
 };
 
@@ -151,11 +159,13 @@ function parseCSV(text: string, skipNameFilter = false): { rows: ParsedRow[]; is
   return { rows, isGmail: gmail };
 }
 
-const TAB_ORDER: ImportType[] = ["contacts", "matters", "invoices", "ar"];
+const TAB_ORDER: ImportType[] = ["contacts", "matters", "invoices", "ar", "ar_detail"];
 
 export default function ImportPage() {
   const [activeTab, setActiveTab] = useState<ImportType>("contacts");
   const [rows, setRows] = useState<ParsedRow[]>([]);
+  const [rawText, setRawText] = useState("");
+  const [rawPreviewLines, setRawPreviewLines] = useState<string[]>([]);
   const [fileName, setFileName] = useState("");
   const [isGmail, setIsGmail] = useState(false);
   const [reportDate, setReportDate] = useState(new Date().toISOString().split("T")[0]);
@@ -172,7 +182,14 @@ export default function ImportPage() {
     setResult(null);
     const reader = new FileReader();
     reader.onload = (e) => {
-      const { rows: parsed, isGmail: gmail } = parseCSV(e.target?.result as string, activeTab === "ar");
+      const text = e.target?.result as string;
+      if (activeTab === "ar_detail") {
+        setRawText(text);
+        setRawPreviewLines(text.split(/\r?\n/).filter(Boolean).slice(0, 12));
+        setStatus("preview");
+        return;
+      }
+      const { rows: parsed, isGmail: gmail } = parseCSV(text, activeTab === "ar");
       setRows(parsed);
       setIsGmail(gmail);
       setStatus("preview");
@@ -188,6 +205,32 @@ export default function ImportPage() {
 
   const handleImport = async () => {
     setStatus("importing");
+
+    // AR Detail: send raw text
+    if (activeTab === "ar_detail") {
+      setProgress({ current: 0, total: 1 });
+      try {
+        const res = await fetch("/api/import/ar-detail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rawText }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        setResult({
+          imported: data.invoices_inserted ?? 0,
+          errors: data.unmatched_matter_numbers?.length
+            ? [`${data.matters_unmatched} matter(s) not found in Collections: ${data.unmatched_matter_numbers.slice(0,5).join(", ")}`]
+            : [],
+        });
+        setStatus("done");
+      } catch (err) {
+        setStatus("error");
+        setResult({ imported: 0, errors: [err instanceof Error ? err.message : "Network error — please try again"] });
+      }
+      return;
+    }
+
     const BATCH = 100;
     const totalBatches = Math.ceil(rows.length / BATCH);
     setProgress({ current: 0, total: rows.length });
@@ -222,6 +265,8 @@ export default function ImportPage() {
 
   const reset = () => {
     setRows([]);
+    setRawText("");
+    setRawPreviewLines([]);
     setFileName("");
     setIsGmail(false);
     setStatus("idle");
@@ -328,8 +373,38 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* Preview */}
-        {status === "preview" && rows.length > 0 && (
+        {/* AR Detail Preview */}
+        {status === "preview" && activeTab === "ar_detail" && rawPreviewLines.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-slate-400" />
+                <span className="text-sm font-medium text-slate-700">{fileName}</span>
+                <Badge variant="info">Ready to import</Badge>
+              </div>
+              <button onClick={reset} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
+            </div>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs text-slate-500">File Preview (first 12 lines)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <pre className="text-[10px] text-slate-600 font-mono whitespace-pre-wrap leading-relaxed bg-slate-50 rounded p-3 max-h-48 overflow-y-auto">
+                  {rawPreviewLines.join("\n")}
+                </pre>
+              </CardContent>
+            </Card>
+            <div className="flex gap-3">
+              <Button onClick={handleImport} className="flex-1">
+                <Upload className="h-4 w-4" /> Import Invoice Details
+              </Button>
+              <Button variant="outline" onClick={reset}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Preview — standard CSV tabs */}
+        {status === "preview" && activeTab !== "ar_detail" && rows.length > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 flex-wrap">
@@ -416,8 +491,9 @@ export default function ImportPage() {
                 <div>
                   <p className="font-semibold text-slate-900">Import complete</p>
                   <p className="text-sm text-slate-500">
-                    {result.imported} {config.label.toLowerCase()} imported
-                    {result.skipped ? `, ${result.skipped} skipped` : ""}
+                    {activeTab === "ar_detail"
+                      ? `${result.imported} invoice line${result.imported !== 1 ? "s" : ""} imported`
+                      : `${result.imported} ${config.label.toLowerCase()} imported${result.skipped ? `, ${result.skipped} skipped` : ""}`}
                   </p>
                 </div>
               </div>
@@ -471,6 +547,8 @@ export default function ImportPage() {
               <Badge variant="secondary">3</Badge> Invoices
               <span>→</span>
               <Badge variant="secondary">4</Badge> AR / Tabs3
+              <span>→</span>
+              <Badge variant="secondary">5</Badge> AR Detail
             </div>
             <p className="text-xs text-slate-400 mt-2">
               Tip: In Gmail, label contacts as &quot;CLIENTS&quot;, &quot;PROSPECTS&quot;, &quot;DEVELOPERS&quot;, etc. before exporting — the importer will auto-assign the correct type.
