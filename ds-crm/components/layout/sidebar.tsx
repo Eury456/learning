@@ -8,6 +8,7 @@ import {
   Activity,
   CheckSquare,
   DollarSign,
+  Upload,
   Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,7 @@ const nav = [
   { label: "Activities", href: "/activities", icon: Activity },
   { label: "Tasks", href: "/tasks", icon: CheckSquare },
   { label: "Revenue", href: "/revenue", icon: DollarSign },
+  { label: "Import Data", href: "/import", icon: Upload },
 ];
 
 export function Sidebar() {
