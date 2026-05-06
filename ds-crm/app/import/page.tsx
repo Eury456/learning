@@ -86,36 +86,56 @@ function convertGmailRow(row: ParsedRow): ParsedRow {
 }
 
 function parseCSV(text: string): { rows: ParsedRow[]; isGmail: boolean } {
-  // Handle both comma and tab separated
-  const lines = text.trim().split("\n").filter(Boolean);
-  if (lines.length < 2) return { rows: [], isGmail: false };
+  if (text.trim().length < 2) return { rows: [], isGmail: false };
 
-  const delimiter = lines[0].includes("\t") ? "\t" : ",";
-  const rawHeaders = lines[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ""));
+  // Split into logical records respecting quoted multi-line fields
+  const delimiter = text.split("\n")[0].includes("\t") ? "\t" : ",";
+  const records: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      current += ch;
+    } else if (ch === "\n" && !inQuotes) {
+      if (current.trim()) records.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) records.push(current);
+
+  if (records.length < 2) return { rows: [], isGmail: false };
+
+  const rawHeaders = records[0].split(delimiter).map(h => h.trim().replace(/^"|"$/g, ""));
   const headers = rawHeaders.map(h => h.toLowerCase());
   const gmail = isGmailFormat(headers);
 
-  const rows = lines.slice(1).map(line => {
-    // Handle quoted fields with commas inside
+  const parseValues = (line: string): string[] => {
     const values: string[] = [];
-    let current = "";
-    let inQuotes = false;
+    let val = "";
+    let inQ = false;
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
-      if (ch === '"') {
-        inQuotes = !inQuotes;
-      } else if ((ch === delimiter) && !inQuotes) {
-        values.push(current.trim());
-        current = "";
-      } else {
-        current += ch;
-      }
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === delimiter && !inQ) { values.push(val.trim()); val = ""; }
+      else { val += ch; }
     }
-    values.push(current.trim());
+    values.push(val.trim());
+    return values;
+  };
 
+  const rows = records.slice(1).map(line => {
+    const values = parseValues(line);
     const raw = headers.reduce((obj, h, i) => ({ ...obj, [h]: values[i] ?? "" }), {} as ParsedRow);
     return gmail ? convertGmailRow(raw) : raw;
-  }).filter(row => row.name || row["name"]);
+  }).filter(row => {
+    const name = row.name || row["name"] || "";
+    // Skip rows where "name" looks like an address fragment
+    return name.length > 1 && !name.match(/^\d+\s/) && !name.match(/^new york/i);
+  });
 
   return { rows, isGmail: gmail };
 }
