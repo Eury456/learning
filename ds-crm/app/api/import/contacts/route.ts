@@ -2,6 +2,11 @@ import { getServiceClient } from "@/lib/supabase";
 import { NextRequest } from "next/server";
 
 export async function POST(request: NextRequest) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!url || url.includes("placeholder")) {
+    return Response.json({ error: "Supabase not configured — add env vars in Vercel settings" }, { status: 500 });
+  }
+
   const supabase = getServiceClient();
   const { rows } = await request.json();
 
@@ -17,14 +22,14 @@ export async function POST(request: NextRequest) {
     linkedin: row.linkedin?.trim() || null,
     birthday: row.birthday?.trim() || null,
     notes: row.notes?.trim() || null,
-  })).filter((r: { name?: string }) => r.name);
+  })).filter((r: { name?: string }) => r.name?.length);
 
   if (records.length === 0) {
-    return Response.json({ error: "No valid records found" }, { status: 400 });
+    return Response.json({ imported: 0, skipped: rows.length, errors: ["No valid records in this batch"] });
   }
 
   const { data, error } = await supabase.from("contacts").insert(records).select();
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return Response.json({ error: `Supabase error: ${error.message} (code: ${error.code})` }, { status: 500 });
 
   return Response.json({ imported: data.length });
 }
