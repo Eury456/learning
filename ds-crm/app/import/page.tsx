@@ -189,7 +189,7 @@ export default function ImportPage() {
         setStatus("preview");
         return;
       }
-      const { rows: parsed, isGmail: gmail } = parseCSV(text, activeTab === "ar");
+      const { rows: parsed, isGmail: gmail } = parseCSV(text, activeTab !== "contacts");
       setRows(parsed);
       setIsGmail(gmail);
       setStatus("preview");
