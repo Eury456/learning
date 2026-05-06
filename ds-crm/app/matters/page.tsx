@@ -1,22 +1,17 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, DollarSign } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, DollarSign, Trash2 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
-import type { Matter, MatterStatus } from "@/types";
-
-const MOCK_MATTERS: Matter[] = [
-  { id: "1", title: "145 W 28th St Rezoning", client_id: "1", type: "rezoning", status: "active", stage: "ULURP Application", description: "C6-2A to C6-4 rezoning for mixed-use tower", estimated_fees: 120000, fees_billed: 85000, fees_collected: 70000, opened_date: "2024-09-01", closed_date: null, created_at: "", updated_at: "" },
-  { id: "2", title: "Greenpoint Mixed-Income MIH", client_id: "1", type: "MIH", status: "active", stage: "HPD Submission", description: "Mandatory Inclusionary Housing — Option A, 25% affordable", estimated_fees: 75000, fees_billed: 45000, fees_collected: 45000, opened_date: "2024-11-15", closed_date: null, created_at: "", updated_at: "" },
-  { id: "3", title: "485-x Application — 520 Atlantic Ave", client_id: "5", type: "485x", status: "active", stage: "Filing", description: "Affordable New York tax exemption for 150-unit project", estimated_fees: 60000, fees_billed: 30000, fees_collected: 20000, opened_date: "2025-01-10", closed_date: null, created_at: "", updated_at: "" },
-  { id: "4", title: "Park Slope Landmark Challenge", client_id: "2", type: "litigation", status: "active", stage: "OATH Hearing", description: "Challenging LPC denial of CoA for façade alteration", estimated_fees: 95000, fees_billed: 60000, fees_collected: 55000, opened_date: "2024-06-20", closed_date: null, created_at: "", updated_at: "" },
-  { id: "5", title: "UAP Coordination — Sunset Park Site", client_id: "5", type: "UAP", status: "prospect", stage: null, description: "Potential UAP designation for manufacturing district project", estimated_fees: 45000, fees_billed: 0, fees_collected: 0, opened_date: null, closed_date: null, created_at: "", updated_at: "" },
-  { id: "6", title: "421-a Compliance Review", client_id: "3", type: "tax_exemption", status: "closed", stage: null, description: "Post-completion review of 421-a compliance obligations", estimated_fees: 30000, fees_billed: 30000, fees_collected: 30000, opened_date: "2023-03-01", closed_date: "2024-12-15", created_at: "", updated_at: "" },
-  { id: "7", title: "Licensing Agreement — 3rd Ave Portfolio", client_id: "2", type: "licensing", status: "active", stage: "Negotiation", description: "Master licensing agreement for ground-floor retail spaces", estimated_fees: 50000, fees_billed: 25000, fees_collected: 25000, opened_date: "2025-02-01", closed_date: null, created_at: "", updated_at: "" },
-];
+import type { Matter, MatterStatus, MatterType, Contact } from "@/types";
 
 const STAGES: Record<MatterStatus, string> = {
   prospect: "Prospect",
@@ -45,19 +40,207 @@ const matterTypeLabel: Record<string, string> = {
   other: "Other",
 };
 
-const columns: MatterStatus[] = ["prospect", "active", "on_hold", "closed"];
+const MATTER_TYPES: MatterType[] = [
+  "rezoning","MIH","UAP","485x","tax_exemption","transaction","litigation","licensing","affordable_housing","other"
+];
+
+const PIPELINE_COLS: MatterStatus[] = ["prospect", "active", "on_hold", "closed"];
+
+interface MatterForm {
+  title: string;
+  client_id: string;
+  clientName: string;
+  type: MatterType;
+  status: MatterStatus;
+  stage: string;
+  description: string;
+  estimated_fees: string;
+  opened_date: string;
+}
+
+const defaultForm: MatterForm = {
+  title: "",
+  client_id: "",
+  clientName: "",
+  type: "rezoning",
+  status: "prospect",
+  stage: "",
+  description: "",
+  estimated_fees: "",
+  opened_date: "",
+};
+
+function ClientSearch({
+  value,
+  displayName,
+  onSelect,
+}: {
+  value: string;
+  displayName: string;
+  onSelect: (id: string, name: string) => void;
+}) {
+  const [search, setSearch] = useState(displayName);
+  const [results, setResults] = useState<Contact[]>([]);
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => { setSearch(displayName); }, [displayName]);
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (search.length < 2) { setResults([]); setOpen(false); return; }
+    timerRef.current = setTimeout(async () => {
+      const res = await fetch(`/api/contacts?search=${encodeURIComponent(search)}`);
+      const data = await res.json();
+      setResults(Array.isArray(data) ? data.slice(0, 8) : []);
+      setOpen(true);
+    }, 300);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [search]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <Input
+        value={search}
+        onChange={e => {
+          setSearch(e.target.value);
+          if (!e.target.value) onSelect("", "");
+        }}
+        placeholder="Type to search contacts..."
+      />
+      {value && (
+        <p className="mt-0.5 text-xs text-green-600">Selected: {displayName}</p>
+      )}
+      {open && results.length > 0 && (
+        <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-slate-200 bg-white shadow-lg max-h-48 overflow-y-auto">
+          {results.map(c => (
+            <button
+              key={c.id}
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"
+              onMouseDown={e => {
+                e.preventDefault();
+                onSelect(c.id, c.name);
+                setSearch(c.name);
+                setOpen(false);
+              }}
+            >
+              <span className="font-medium text-slate-900">{c.name}</span>
+              {c.company && <span className="text-slate-400 text-xs">· {c.company}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function MattersPage() {
+  const [matters, setMatters] = useState<Matter[]>([]);
+  const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"pipeline" | "list">("pipeline");
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingMatter, setEditingMatter] = useState<Matter | null>(null);
+  const [form, setForm] = useState<MatterForm>(defaultForm);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const byStatus = (status: MatterStatus) => MOCK_MATTERS.filter((m) => m.status === status);
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await fetch("/api/matters");
+    const data = await res.json();
+    setMatters(Array.isArray(data) ? data : []);
+    setLoading(false);
+  }, []);
 
-  const totalPipeline = MOCK_MATTERS.filter((m) => m.status === "active" || m.status === "prospect")
+  useEffect(() => { load(); }, [load]);
+
+  const openAdd = () => {
+    setEditingMatter(null);
+    setForm(defaultForm);
+    setError("");
+    setShowDialog(true);
+  };
+
+  const openEdit = (matter: Matter) => {
+    setEditingMatter(matter);
+    setForm({
+      title: matter.title,
+      client_id: matter.client_id,
+      clientName: (matter.client as Contact | undefined)?.name ?? "",
+      type: matter.type,
+      status: matter.status,
+      stage: matter.stage ?? "",
+      description: matter.description ?? "",
+      estimated_fees: matter.estimated_fees?.toString() ?? "",
+      opened_date: matter.opened_date ?? "",
+    });
+    setError("");
+    setShowDialog(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.title.trim()) { setError("Matter title is required."); return; }
+    if (!form.client_id) { setError("Client is required — search and select a contact."); return; }
+    setSaving(true);
+    const body = {
+      title: form.title.trim(),
+      client_id: form.client_id,
+      type: form.type,
+      status: form.status,
+      stage: form.stage.trim() || null,
+      description: form.description.trim() || null,
+      estimated_fees: form.estimated_fees ? parseFloat(form.estimated_fees) : null,
+      opened_date: form.opened_date || null,
+    };
+    const res = editingMatter
+      ? await fetch(`/api/matters/${editingMatter.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      : await fetch("/api/matters", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+    const data = await res.json();
+    setSaving(false);
+    if (data.error) { setError(data.error); return; }
+    setShowDialog(false);
+    load();
+  };
+
+  const handleDelete = async () => {
+    if (!editingMatter) return;
+    if (!confirm(`Delete "${editingMatter.title}"? This cannot be undone.`)) return;
+    await fetch(`/api/matters/${editingMatter.id}`, { method: "DELETE" });
+    setShowDialog(false);
+    load();
+  };
+
+  const byStatus = (status: MatterStatus) => matters.filter(m => m.status === status);
+  const activePipeline = matters
+    .filter(m => m.status === "active" || m.status === "prospect")
     .reduce((sum, m) => sum + (m.estimated_fees ?? 0), 0);
 
   return (
     <div className="flex flex-col h-full overflow-auto">
-      <Header title="Matters" subtitle={`${MOCK_MATTERS.length} matters · ${formatCurrency(totalPipeline)} pipeline`} />
+      <Header
+        title="Matters"
+        subtitle={loading ? "Loading..." : `${matters.length} matters · ${formatCurrency(activePipeline)} pipeline`}
+      />
 
       <div className="flex-1 p-6 space-y-4">
         {/* Toolbar */}
@@ -75,37 +258,60 @@ export default function MattersPage() {
               </button>
             ))}
           </div>
-          <Button size="sm">
+          <Button size="sm" onClick={openAdd}>
             <Plus className="h-3.5 w-3.5" />
             New Matter
           </Button>
         </div>
 
+        {loading && (
+          <div className="flex items-center justify-center py-20 text-slate-400 text-sm">
+            Loading matters...
+          </div>
+        )}
+
+        {!loading && matters.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <p className="text-slate-500 font-medium">No matters yet</p>
+            <p className="text-slate-400 text-sm mt-1">Click &quot;New Matter&quot; to add your first matter.</p>
+          </div>
+        )}
+
         {/* Pipeline View */}
-        {view === "pipeline" && (
+        {!loading && view === "pipeline" && matters.length > 0 && (
           <div className="grid grid-cols-4 gap-4 min-h-0">
-            {columns.map((status) => {
-              const matters = byStatus(status);
-              const colTotal = matters.reduce((sum, m) => sum + (m.estimated_fees ?? 0), 0);
+            {PIPELINE_COLS.map((status) => {
+              const colMatters = byStatus(status);
+              const colTotal = colMatters.reduce((sum, m) => sum + (m.estimated_fees ?? 0), 0);
               return (
                 <div key={status} className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Badge variant={statusVariant[status]}>{STAGES[status]}</Badge>
-                      <span className="text-xs text-slate-500">{matters.length}</span>
+                      <span className="text-xs text-slate-500">{colMatters.length}</span>
                     </div>
                     {colTotal > 0 && (
                       <span className="text-xs font-medium text-slate-600">{formatCurrency(colTotal)}</span>
                     )}
                   </div>
                   <div className="space-y-2">
-                    {matters.map((matter) => (
-                      <Card key={matter.id} className="cursor-pointer hover:shadow-md transition-shadow">
+                    {colMatters.map((matter) => (
+                      <Card
+                        key={matter.id}
+                        className="cursor-pointer hover:shadow-md transition-shadow"
+                        onClick={() => openEdit(matter)}
+                      >
                         <CardContent className="p-3">
                           <p className="text-sm font-medium text-slate-900 leading-snug">{matter.title}</p>
+                          {(matter.client as Contact | undefined)?.name && (
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {(matter.client as Contact).name}
+                              {(matter.client as Contact).company && ` · ${(matter.client as Contact).company}`}
+                            </p>
+                          )}
                           <div className="mt-1 flex items-center gap-1">
                             <Badge variant="secondary" className="text-[10px] px-1.5">
-                              {matterTypeLabel[matter.type]}
+                              {matterTypeLabel[matter.type] ?? matter.type}
                             </Badge>
                           </div>
                           {matter.stage && (
@@ -117,7 +323,7 @@ export default function MattersPage() {
                               {formatCurrency(matter.estimated_fees)} est.
                             </div>
                           )}
-                          {matter.fees_billed !== null && matter.fees_billed > 0 && (
+                          {(matter.fees_billed ?? 0) > 0 && (
                             <div className="mt-1">
                               <div className="h-1 w-full rounded-full bg-slate-100">
                                 <div
@@ -128,13 +334,18 @@ export default function MattersPage() {
                                 />
                               </div>
                               <p className="mt-0.5 text-[10px] text-slate-400">
-                                {formatCurrency(matter.fees_collected ?? 0)} collected / {formatCurrency(matter.fees_billed)} billed
+                                {formatCurrency(matter.fees_collected ?? 0)} / {formatCurrency(matter.fees_billed ?? 0)} billed
                               </p>
                             </div>
                           )}
                         </CardContent>
                       </Card>
                     ))}
+                    {colMatters.length === 0 && (
+                      <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center">
+                        <p className="text-xs text-slate-400">No {STAGES[status].toLowerCase()} matters</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -143,35 +354,49 @@ export default function MattersPage() {
         )}
 
         {/* List View */}
-        {view === "list" && (
+        {!loading && view === "list" && matters.length > 0 && (
           <Card>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Matter</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Client</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Type</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Stage</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500">Est. Fees</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500">Billed</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500">Collected</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {MOCK_MATTERS.map((matter) => (
-                    <tr key={matter.id} className="hover:bg-slate-50 cursor-pointer">
+                  {matters.map((matter) => (
+                    <tr
+                      key={matter.id}
+                      className="hover:bg-slate-50 cursor-pointer"
+                      onClick={() => openEdit(matter)}
+                    >
                       <td className="px-4 py-3 font-medium text-slate-900">{matter.title}</td>
-                      <td className="px-4 py-3">
-                        <Badge variant="secondary" className="text-[10px]">{matterTypeLabel[matter.type]}</Badge>
+                      <td className="px-4 py-3 text-slate-500 text-xs">
+                        {(matter.client as Contact | undefined)?.name ?? "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={statusVariant[matter.status]} className="text-[10px]">{STAGES[matter.status]}</Badge>
+                        <Badge variant="secondary" className="text-[10px]">
+                          {matterTypeLabel[matter.type] ?? matter.type}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={statusVariant[matter.status]} className="text-[10px]">
+                          {STAGES[matter.status]}
+                        </Badge>
                       </td>
                       <td className="px-4 py-3 text-slate-500">{matter.stage ?? "—"}</td>
-                      <td className="px-4 py-3 text-right text-slate-700">{matter.estimated_fees ? formatCurrency(matter.estimated_fees) : "—"}</td>
-                      <td className="px-4 py-3 text-right text-slate-700">{matter.fees_billed ? formatCurrency(matter.fees_billed) : "—"}</td>
-                      <td className="px-4 py-3 text-right text-green-700 font-medium">{matter.fees_collected ? formatCurrency(matter.fees_collected) : "—"}</td>
+                      <td className="px-4 py-3 text-right text-slate-700">
+                        {matter.estimated_fees ? formatCurrency(matter.estimated_fees) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right text-green-700 font-medium">
+                        {matter.fees_collected ? formatCurrency(matter.fees_collected) : "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -180,6 +405,115 @@ export default function MattersPage() {
           </Card>
         )}
       </div>
+
+      {/* Add / Edit Dialog */}
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingMatter ? "Edit Matter" : "New Matter"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="title">Matter Title *</Label>
+              <Input
+                id="title"
+                value={form.title}
+                onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                placeholder="e.g. 145 W 28th St Rezoning"
+              />
+            </div>
+            <div>
+              <Label>Client *</Label>
+              <ClientSearch
+                value={form.client_id}
+                displayName={form.clientName}
+                onSelect={(id, name) => setForm(f => ({ ...f, client_id: id, clientName: name }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="type">Type</Label>
+                <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v as MatterType }))}>
+                  <SelectTrigger id="type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {MATTER_TYPES.map(t => (
+                      <SelectItem key={t} value={t}>{matterTypeLabel[t]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="status">Status</Label>
+                <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v as MatterStatus }))}>
+                  <SelectTrigger id="status"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(["prospect","active","on_hold","closed"] as MatterStatus[]).map(s => (
+                      <SelectItem key={s} value={s}>{STAGES[s]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="stage">Stage / Phase</Label>
+                <Input
+                  id="stage"
+                  value={form.stage}
+                  onChange={e => setForm(f => ({ ...f, stage: e.target.value }))}
+                  placeholder="e.g. ULURP Application"
+                />
+              </div>
+              <div>
+                <Label htmlFor="estimated_fees">Estimated Fees ($)</Label>
+                <Input
+                  id="estimated_fees"
+                  type="number"
+                  value={form.estimated_fees}
+                  onChange={e => setForm(f => ({ ...f, estimated_fees: e.target.value }))}
+                  placeholder="e.g. 75000"
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="opened_date">Opened Date</Label>
+              <Input
+                id="opened_date"
+                type="date"
+                value={form.opened_date}
+                onChange={e => setForm(f => ({ ...f, opened_date: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label htmlFor="description">Description / Notes</Label>
+              <Textarea
+                id="description"
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="Project overview, key issues, strategy notes..."
+                rows={3}
+              />
+            </div>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+          </div>
+          <DialogFooter className="flex items-center justify-between">
+            {editingMatter ? (
+              <Button variant="destructive" size="sm" onClick={handleDelete}>
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
+              <Button onClick={handleSave} disabled={saving}>
+                {saving ? "Saving..." : editingMatter ? "Save Changes" : "Create Matter"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

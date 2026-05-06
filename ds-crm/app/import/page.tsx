@@ -4,9 +4,11 @@ import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Upload, Download, CheckCircle, AlertCircle, FileText, X } from "lucide-react";
 
-type ImportType = "contacts" | "matters" | "invoices";
+type ImportType = "contacts" | "matters" | "invoices" | "ar";
 
 interface ParsedRow {
   [key: string]: string;
@@ -18,14 +20,21 @@ interface ImportResult {
   errors?: string[];
 }
 
-const CONFIG = {
+const CONFIG: Record<ImportType, {
+  label: string;
+  description: string;
+  template: string;
+  requiredColumns: string[];
+  columns: string[];
+  typeNote: string;
+}> = {
   contacts: {
     label: "Contacts",
     description: "Import clients, prospects, referral sources, developers, and other relationships. Supports Gmail CSV format automatically.",
     template: "/templates/contacts-template.csv",
     requiredColumns: ["name"],
     columns: ["name","company","title","type","email","phone","linkedin","birthday","notes"],
-    typeNote: 'type: client, prospect, referral_source, developer, architect, broker, lender, consultant, government, other',
+    typeNote: "type: client, prospect, referral_source, developer, architect, broker, lender, consultant, government, other",
   },
   matters: {
     label: "Matters",
@@ -33,25 +42,31 @@ const CONFIG = {
     template: "/templates/matters-template.csv",
     requiredColumns: ["title","client_name"],
     columns: ["title","client_name","type","status","stage","estimated_fees","opened_date","description"],
-    typeNote: 'type: rezoning, MIH, UAP, 485x, tax_exemption, transaction, litigation, licensing, affordable_housing, other',
+    typeNote: "type: rezoning, MIH, UAP, 485x, tax_exemption, transaction, litigation, licensing, affordable_housing, other",
   },
   invoices: {
-    label: "Invoices / AR",
+    label: "Invoices",
     description: "Import outstanding and historical invoices — matters must be imported first",
     template: "/templates/invoices-template.csv",
     requiredColumns: ["matter_title","amount_billed","due_date"],
     columns: ["matter_title","invoice_number","amount_billed","amount_collected","invoice_date","due_date","status","notes"],
-    typeNote: 'status: current, 30+, 60+, 90+, paid, written_off',
+    typeNote: "status: current, 30+, 60+, 90+, paid, written_off",
+  },
+  ar: {
+    label: "AR / Tabs3",
+    description: "Import AR aging report from Tabs3 — each row is a matter with balances bucketed by age",
+    template: "/templates/ar-template.csv",
+    requiredColumns: ["client_name","balance_due"],
+    columns: ["matter_number","client_name","matter_description","days_0_27","days_28_60","days_61_90","days_91_120","days_121_180","days_181_plus","balance_due","report_date"],
+    typeNote: "balance_due must be > 0 to be imported; report_date defaults to today if blank",
   },
 };
 
-// Detect if this is a Gmail-exported CSV
 function isGmailFormat(headers: string[]): boolean {
   return headers.some(h => h.toLowerCase().includes("first name")) &&
     headers.some(h => h.toLowerCase().includes("last name"));
 }
 
-// Convert Gmail row to DS-CRM contact format
 function convertGmailRow(row: ParsedRow): ParsedRow {
   const firstName = row["first name"]?.trim() ?? "";
   const lastName = row["last name"]?.trim() ?? "";
@@ -67,16 +82,13 @@ function convertGmailRow(row: ParsedRow): ParsedRow {
   else if (labels.includes("lender")) type = "lender";
   else if (labels.includes("architect")) type = "architect";
 
-  // Find primary email
   const email = row["e-mail 1 - value"]?.trim() ||
     row["e-mail 2 - value"]?.trim() ||
     row["e-mail 3 - value"]?.trim() || "";
 
-  // Find primary phone
   const phone = row["phone 1 - value"]?.trim() ||
     row["phone 2 - value"]?.trim() || "";
 
-  // Birthday — Gmail uses --MM-DD or YYYY-MM-DD
   let birthday = row["birthday"]?.trim() || "";
   if (birthday.startsWith("--")) birthday = "";
 
@@ -88,7 +100,6 @@ function convertGmailRow(row: ParsedRow): ParsedRow {
 function parseCSV(text: string): { rows: ParsedRow[]; isGmail: boolean } {
   if (text.trim().length < 2) return { rows: [], isGmail: false };
 
-  // Split into logical records respecting quoted multi-line fields
   const delimiter = text.split("\n")[0].includes("\t") ? "\t" : ",";
   const records: string[] = [];
   let current = "";
@@ -133,18 +144,20 @@ function parseCSV(text: string): { rows: ParsedRow[]; isGmail: boolean } {
     return gmail ? convertGmailRow(raw) : raw;
   }).filter(row => {
     const name = row.name || row["name"] || "";
-    // Skip rows where "name" looks like an address fragment
     return name.length > 1 && !name.match(/^\d+\s/) && !name.match(/^new york/i);
   });
 
   return { rows, isGmail: gmail };
 }
 
+const TAB_ORDER: ImportType[] = ["contacts", "matters", "invoices", "ar"];
+
 export default function ImportPage() {
   const [activeTab, setActiveTab] = useState<ImportType>("contacts");
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [fileName, setFileName] = useState("");
   const [isGmail, setIsGmail] = useState(false);
+  const [reportDate, setReportDate] = useState(new Date().toISOString().split("T")[0]);
   const [status, setStatus] = useState<"idle" | "preview" | "importing" | "done" | "error">("idle");
   const [result, setResult] = useState<ImportResult | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -183,10 +196,13 @@ export default function ImportPage() {
     try {
       for (let i = 0; i < totalBatches; i++) {
         const batch = rows.slice(i * BATCH, (i + 1) * BATCH);
+        const body: Record<string, unknown> = { rows: batch };
+        if (activeTab === "ar") body.report_date = reportDate;
+
         const res = await fetch(`/api/import/${activeTab}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows: batch }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -218,6 +234,11 @@ export default function ImportPage() {
     reset();
   };
 
+  const nextTab = (): ImportType => {
+    const idx = TAB_ORDER.indexOf(activeTab);
+    return TAB_ORDER[(idx + 1) % TAB_ORDER.length];
+  };
+
   const previewColumns = rows.length > 0 ? Object.keys(rows[0]) : [];
 
   return (
@@ -226,8 +247,8 @@ export default function ImportPage() {
 
       <div className="flex-1 p-6 space-y-6 max-w-4xl">
         {/* Tabs */}
-        <div className="flex gap-2">
-          {(["contacts", "matters", "invoices"] as ImportType[]).map((t) => (
+        <div className="flex gap-2 flex-wrap">
+          {TAB_ORDER.map((t) => (
             <button
               key={t}
               onClick={() => switchTab(t)}
@@ -261,6 +282,25 @@ export default function ImportPage() {
           </CardContent>
         </Card>
 
+        {/* AR-specific report date */}
+        {activeTab === "ar" && status === "idle" && (
+          <Card>
+            <CardContent className="p-4 flex items-center gap-4">
+              <Label htmlFor="report-date" className="text-sm font-medium text-slate-700 whitespace-nowrap">
+                Report Date
+              </Label>
+              <Input
+                id="report-date"
+                type="date"
+                value={reportDate}
+                onChange={e => setReportDate(e.target.value)}
+                className="w-44"
+              />
+              <p className="text-xs text-slate-400">Date of the Tabs3 aging report (defaults to today)</p>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Upload Zone */}
         {status === "idle" && (
           <div
@@ -271,7 +311,9 @@ export default function ImportPage() {
           >
             <Upload className="h-10 w-10 text-slate-300 mb-3" />
             <p className="text-sm font-medium text-slate-700">Drop your CSV here or click to browse</p>
-            <p className="text-xs text-slate-400 mt-1">Supports Gmail CSV and DS-CRM template format</p>
+            <p className="text-xs text-slate-400 mt-1">
+              {activeTab === "contacts" ? "Supports Gmail CSV and DS-CRM template format" : "Use the template above as a guide"}
+            </p>
             <input
               ref={fileRef}
               type="file"
@@ -292,7 +334,7 @@ export default function ImportPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <FileText className="h-4 w-4 text-slate-400" />
                 <span className="text-sm font-medium text-slate-700">{fileName}</span>
-                <Badge variant="info">{rows.length} contacts</Badge>
+                <Badge variant="info">{rows.length} {config.label.toLowerCase()}</Badge>
                 {isGmail && <Badge variant="purple">Gmail format — auto-converted</Badge>}
               </div>
               <button onClick={reset} className="text-slate-400 hover:text-slate-600">
@@ -393,8 +435,8 @@ export default function ImportPage() {
 
               <div className="flex gap-3">
                 <Button onClick={reset} variant="outline">Import More</Button>
-                <Button onClick={() => switchTab(activeTab === "contacts" ? "matters" : activeTab === "matters" ? "invoices" : "contacts")}>
-                  Next: {activeTab === "contacts" ? "Import Matters" : activeTab === "matters" ? "Import Invoices" : "Import Contacts"}
+                <Button onClick={() => switchTab(nextTab())}>
+                  Next: {CONFIG[nextTab()].label}
                 </Button>
               </div>
             </CardContent>
@@ -419,13 +461,15 @@ export default function ImportPage() {
         {/* Order reminder */}
         <Card className="bg-slate-50 border-slate-200">
           <CardContent className="p-4">
-            <p className="text-xs font-semibold text-slate-600 mb-2">Import order matters:</p>
+            <p className="text-xs font-semibold text-slate-600 mb-2">Recommended import order:</p>
             <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
-              <Badge variant="secondary">1</Badge> Contacts first
+              <Badge variant="secondary">1</Badge> Contacts
               <span>→</span>
-              <Badge variant="secondary">2</Badge> Matters (needs contacts)
+              <Badge variant="secondary">2</Badge> Matters
               <span>→</span>
-              <Badge variant="secondary">3</Badge> Invoices (needs matters)
+              <Badge variant="secondary">3</Badge> Invoices
+              <span>→</span>
+              <Badge variant="secondary">4</Badge> AR / Tabs3
             </div>
             <p className="text-xs text-slate-400 mt-2">
               Tip: In Gmail, label contacts as &quot;CLIENTS&quot;, &quot;PROSPECTS&quot;, &quot;DEVELOPERS&quot;, etc. before exporting — the importer will auto-assign the correct type.

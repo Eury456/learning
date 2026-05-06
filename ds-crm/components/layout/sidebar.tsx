@@ -10,6 +10,7 @@ import {
   DollarSign,
   Upload,
   Building2,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +21,7 @@ const nav = [
   { label: "Activities", href: "/activities", icon: Activity },
   { label: "Tasks", href: "/tasks", icon: CheckSquare },
   { label: "Revenue", href: "/revenue", icon: DollarSign },
+  { label: "Collections", href: "/collections", icon: ClipboardList },
   { label: "Import Data", href: "/import", icon: Upload },
 ];
 
