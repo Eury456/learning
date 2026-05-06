@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, Trash2, MapPin, Building, User } from "lucide-react";
+import { ContactSearch } from "@/components/ui/contact-search";
 import type { Contact } from "@/types";
 
 interface Company {
@@ -96,67 +97,6 @@ const defaultForm: ProjectForm = {
   notes: "",
 };
 
-function ContactSearch({ value, displayName, onSelect, placeholder }: {
-  value: string; displayName: string; onSelect: (id: string, name: string) => void; placeholder?: string;
-}) {
-  const [search, setSearch] = useState(displayName);
-  const [results, setResults] = useState<Contact[]>([]);
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => { setSearch(displayName); }, [displayName]);
-
-  useEffect(() => {
-    if (timer.current) clearTimeout(timer.current);
-    if (search.length < 2) { setResults([]); setOpen(false); return; }
-    timer.current = setTimeout(async () => {
-      const res = await fetch(`/api/contacts?search=${encodeURIComponent(search)}`);
-      const data = await res.json();
-      setResults(Array.isArray(data) ? data.slice(0, 8) : []);
-      setOpen(true);
-    }, 300);
-    return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [search]);
-
-  useEffect(() => {
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-
-  return (
-    <div ref={ref} className="relative">
-      <Input
-        value={search}
-        onChange={e => { setSearch(e.target.value); if (!e.target.value) onSelect("", ""); }}
-        placeholder={placeholder ?? "Search contacts..."}
-      />
-      {open && results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-slate-200 bg-white shadow-lg max-h-44 overflow-y-auto">
-          {results.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
-              onMouseDown={e => {
-                e.preventDefault();
-                onSelect(c.id, c.name);
-                setSearch(c.name);
-                setOpen(false);
-              }}
-            >
-              <span className="font-medium">{c.name}</span>
-              {c.company && <span className="text-slate-400 text-xs ml-1">· {c.company}</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function CompanySearch({ value, displayName, onSelect }: {
   value: string; displayName: string; onSelect: (id: string, name: string) => void;

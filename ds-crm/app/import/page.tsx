@@ -18,6 +18,8 @@ interface ImportResult {
   imported: number;
   skipped?: number;
   errors?: string[];
+  updated?: number;
+  resolved?: number;
 }
 
 const CONFIG: Record<ImportType, {
@@ -235,7 +237,7 @@ export default function ImportPage() {
     const totalBatches = Math.ceil(rows.length / BATCH);
     setProgress({ current: 0, total: rows.length });
 
-    const combined: ImportResult = { imported: 0, skipped: 0, errors: [] };
+    const combined: ImportResult = { imported: 0, skipped: 0, errors: [], updated: 0, resolved: 0 };
 
     try {
       for (let i = 0; i < totalBatches; i++) {
@@ -253,6 +255,8 @@ export default function ImportPage() {
         combined.imported += data.imported ?? 0;
         combined.skipped = (combined.skipped ?? 0) + (data.skipped ?? 0);
         combined.errors = [...(combined.errors ?? []), ...(data.errors ?? [])];
+        combined.updated = (combined.updated ?? 0) + (data.updated ?? 0);
+        combined.resolved = (combined.resolved ?? 0) + (data.resolved ?? 0);
         setProgress({ current: Math.min((i + 1) * BATCH, rows.length), total: rows.length });
       }
       setResult(combined);
@@ -511,10 +515,23 @@ export default function ImportPage() {
                   <p className="text-sm text-slate-500">
                     {activeTab === "ar_detail"
                       ? `${result.imported} invoice line${result.imported !== 1 ? "s" : ""} imported`
-                      : `${result.imported} ${config.label.toLowerCase()} imported${result.skipped ? `, ${result.skipped} skipped` : ""}`}
+                      : activeTab === "ar"
+                        ? [
+                            result.imported > 0 && `${result.imported} new`,
+                            (result.updated ?? 0) > 0 && `${result.updated} updated`,
+                          ].filter(Boolean).join(", ") + " AR records"
+                        : `${result.imported} ${config.label.toLowerCase()} imported${result.skipped ? `, ${result.skipped} skipped` : ""}`}
                   </p>
                 </div>
               </div>
+
+              {activeTab === "ar" && (result.resolved ?? 0) > 0 && (
+                <div className="rounded-lg bg-green-50 border border-green-100 p-3">
+                  <p className="text-xs font-semibold text-green-700">
+                    &#10003; {result.resolved} matter{result.resolved !== 1 ? "s" : ""} marked as paid — balance cleared to $0 in this report. A payment note has been added to the activity log for each.
+                  </p>
+                </div>
+              )}
 
               {result.errors && result.errors.length > 0 && (
                 <div className="rounded-lg bg-amber-50 border border-amber-100 p-3 space-y-1">

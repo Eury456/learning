@@ -9,8 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2, List, Columns, User, DollarSign, Calendar, X, Settings, GripVertical } from "lucide-react";
-import type { Contact } from "@/types";
+import { Plus, Trash2, List, Columns, User, DollarSign, Calendar, X, Settings, GripVertical, UserPlus } from "lucide-react";
+import type { Contact, ContactType } from "@/types";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -141,6 +141,19 @@ function fmt$(n: number | null | undefined) {
 
 // ── Contact/Company search component ──────────────────────────────────────────
 
+const CONTACT_TYPES_OPP: { value: ContactType; label: string }[] = [
+  { value: "client",          label: "Client" },
+  { value: "prospect",        label: "Prospect" },
+  { value: "developer",       label: "Developer" },
+  { value: "referral_source", label: "Referral Source" },
+  { value: "architect",       label: "Architect" },
+  { value: "broker",          label: "Broker" },
+  { value: "lender",          label: "Lender" },
+  { value: "consultant",      label: "Consultant" },
+  { value: "government",      label: "Government" },
+  { value: "other",           label: "Other" },
+];
+
 function ContactSearch({
   label, value, onChange, onSelect,
 }: {
@@ -151,10 +164,14 @@ function ContactSearch({
 }) {
   const [results, setResults] = useState<Contact[]>([]);
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [newContact, setNewContact] = useState({ name: "", email: "", phone: "", type: "other" as ContactType, company: "" });
+  const [createError, setCreateError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const container = useRef<HTMLDivElement>(null);
 
-  const search = useCallback((q: string) => {
+  const doSearch = useCallback((q: string) => {
     if (!q.trim()) { setResults([]); setOpen(false); return; }
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
@@ -165,34 +182,112 @@ function ContactSearch({
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (container.current && !container.current.contains(e.target as Node)) setOpen(false);
+      if (container.current && !container.current.contains(e.target as Node)) {
+        setOpen(false);
+        setCreating(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  const startCreating = () => {
+    setNewContact({ name: value, email: "", phone: "", type: "other", company: "" });
+    setCreateError("");
+    setCreating(true);
+  };
+
+  const handleCreate = async () => {
+    if (!newContact.name.trim()) { setCreateError("Name is required."); return; }
+    setSaving(true);
+    setCreateError("");
+    const res = await fetch("/api/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: newContact.name.trim(),
+        email: newContact.email.trim() || null,
+        phone: newContact.phone.trim() || null,
+        type: newContact.type,
+        company: newContact.company.trim() || null,
+      }),
+    });
+    const data = await res.json();
+    setSaving(false);
+    if (data.error) { setCreateError(data.error); return; }
+    onChange(data.name);
+    onSelect(data as Contact);
+    setOpen(false);
+    setCreating(false);
+  };
 
   return (
     <div className="relative" ref={container}>
       <Label className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 block">{label}</Label>
       <Input
         value={value}
-        onChange={e => { onChange(e.target.value); search(e.target.value); }}
+        onChange={e => { onChange(e.target.value); setCreating(false); doSearch(e.target.value); }}
         placeholder="Search contacts..."
         className="h-9"
       />
-      {open && results.length > 0 && (
-        <div className="absolute z-50 mt-1 w-full bg-white rounded-md shadow-lg border border-gray-200 max-h-48 overflow-y-auto">
-          {results.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onMouseDown={e => { e.preventDefault(); onSelect(c); setOpen(false); }}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-            >
-              <div className="font-medium">{c.name}</div>
-              {c.company && <div className="text-xs text-gray-500">{c.company}</div>}
-            </button>
-          ))}
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-white rounded-md shadow-lg border border-gray-200">
+          {!creating ? (
+            <>
+              <div className="max-h-44 overflow-y-auto">
+                {results.map(c => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onMouseDown={e => { e.preventDefault(); onSelect(c); setOpen(false); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                  >
+                    <div className="font-medium">{c.name}</div>
+                    {c.company && <div className="text-xs text-gray-500">{c.company}</div>}
+                  </button>
+                ))}
+                {results.length === 0 && value.length >= 2 && (
+                  <p className="px-3 py-2 text-xs text-slate-400">No contacts found for &quot;{value}&quot;</p>
+                )}
+              </div>
+              <div className="border-t border-slate-100">
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50 flex items-center gap-1.5 font-medium"
+                  onMouseDown={e => { e.preventDefault(); startCreating(); }}
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Create &quot;{value}&quot; as new contact
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="p-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                <UserPlus className="h-3.5 w-3.5 text-indigo-500" />
+                New Contact
+              </p>
+              <Input value={newContact.name} onChange={e => setNewContact(n => ({ ...n, name: e.target.value }))} placeholder="Full name *" className="text-xs h-8" autoFocus />
+              <div className="grid grid-cols-2 gap-2">
+                <Input value={newContact.email} onChange={e => setNewContact(n => ({ ...n, email: e.target.value }))} placeholder="Email" type="email" className="text-xs h-8" />
+                <Input value={newContact.phone} onChange={e => setNewContact(n => ({ ...n, phone: e.target.value }))} placeholder="Phone" className="text-xs h-8" />
+              </div>
+              <Input value={newContact.company} onChange={e => setNewContact(n => ({ ...n, company: e.target.value }))} placeholder="Company" className="text-xs h-8" />
+              <Select value={newContact.type} onValueChange={v => setNewContact(n => ({ ...n, type: v as ContactType }))}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CONTACT_TYPES_OPP.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {createError && <p className="text-xs text-red-600">{createError}</p>}
+              <div className="flex gap-2 pt-1">
+                <Button size="sm" className="flex-1 h-8 text-xs" onMouseDown={e => { e.preventDefault(); handleCreate(); }} disabled={saving || !newContact.name.trim()}>
+                  {saving ? "Creating..." : "Create & Select"}
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 text-xs" onMouseDown={e => { e.preventDefault(); setCreating(false); }}>Cancel</Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

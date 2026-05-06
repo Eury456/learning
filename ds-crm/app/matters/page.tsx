@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, DollarSign, Trash2 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { ContactSearch } from "@/components/ui/contact-search";
 import type { Matter, MatterStatus, MatterType, Contact } from "@/types";
 
 const STAGES: Record<MatterStatus, string> = {
@@ -70,81 +71,6 @@ const defaultForm: MatterForm = {
   opened_date: "",
 };
 
-function ClientSearch({
-  value,
-  displayName,
-  onSelect,
-}: {
-  value: string;
-  displayName: string;
-  onSelect: (id: string, name: string) => void;
-}) {
-  const [search, setSearch] = useState(displayName);
-  const [results, setResults] = useState<Contact[]>([]);
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => { setSearch(displayName); }, [displayName]);
-
-  useEffect(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (search.length < 2) { setResults([]); setOpen(false); return; }
-    timerRef.current = setTimeout(async () => {
-      const res = await fetch(`/api/contacts?search=${encodeURIComponent(search)}`);
-      const data = await res.json();
-      setResults(Array.isArray(data) ? data.slice(0, 8) : []);
-      setOpen(true);
-    }, 300);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [search]);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  return (
-    <div ref={containerRef} className="relative">
-      <Input
-        value={search}
-        onChange={e => {
-          setSearch(e.target.value);
-          if (!e.target.value) onSelect("", "");
-        }}
-        placeholder="Type to search contacts..."
-      />
-      {value && (
-        <p className="mt-0.5 text-xs text-green-600">Selected: {displayName}</p>
-      )}
-      {open && results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-slate-200 bg-white shadow-lg max-h-48 overflow-y-auto">
-          {results.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"
-              onMouseDown={e => {
-                e.preventDefault();
-                onSelect(c.id, c.name);
-                setSearch(c.name);
-                setOpen(false);
-              }}
-            >
-              <span className="font-medium text-slate-900">{c.name}</span>
-              {c.company && <span className="text-slate-400 text-xs">· {c.company}</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function MattersPage() {
   const [matters, setMatters] = useState<Matter[]>([]);
@@ -424,10 +350,11 @@ export default function MattersPage() {
             </div>
             <div>
               <Label>Client *</Label>
-              <ClientSearch
+              <ContactSearch
                 value={form.client_id}
                 displayName={form.clientName}
                 onSelect={(id, name) => setForm(f => ({ ...f, client_id: id, clientName: name }))}
+                placeholder="Type to search or create a contact..."
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
