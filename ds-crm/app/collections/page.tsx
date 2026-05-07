@@ -202,12 +202,12 @@ function parsedItem(item: ARItem): ParsedARItem {
     };
   }
 
-  // Just a bare matter number stored in client_name (very old format)
+  // Just a bare matter number stored in client_name (old import format)
   const bareNum = raw.match(/^(\d+\.\d+[A-Za-z]?)\s*$/);
   if (bareNum) {
     return {
       matterNum: item.matter_number ?? bareNum[1],
-      clientName: "",
+      clientName: item.contact?.name ?? item.ar_contact_name ?? "",
       description: item.matter_description,
     };
   }

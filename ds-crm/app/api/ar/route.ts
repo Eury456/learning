@@ -1,6 +1,42 @@
 import { getServiceClient } from "@/lib/supabase";
 import { NextRequest } from "next/server";
 
+// Deduplicate rows by effective matter number, preferring records with a real client name
+// over old-format records where client_name held just the matter number.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function deduplicateByMatterNumber(rows: any[]): any[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const best: Record<string, any> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const noNum: any[] = [];
+
+  for (const row of rows) {
+    let num: string | null = row.matter_number ?? null;
+    if (!num) {
+      // Old format: bare matter number stored in client_name
+      const m = (row.client_name ?? "").match(/^(\d+\.\d+[A-Za-z\d.]*)\s*$/);
+      if (m) num = m[1];
+    }
+
+    if (!num) { noNum.push(row); continue; }
+
+    const existing = best[num];
+    if (!existing) { best[num] = row; continue; }
+
+    // Prefer record whose client_name is NOT just a bare matter number
+    const existingIsNumeric = /^\d+\.\d+/.test(existing.client_name ?? "");
+    const rowIsNumeric = /^\d+\.\d+/.test(row.client_name ?? "");
+
+    if (!rowIsNumeric && existingIsNumeric) { best[num] = row; continue; }
+    if (rowIsNumeric && !existingIsNumeric) continue;
+
+    // Same quality — keep higher balance
+    if (row.balance_due > existing.balance_due) best[num] = row;
+  }
+
+  return [...Object.values(best), ...noNum];
+}
+
 // Merge matter type from matters table by matter_number (text join, no FK needed).
 async function enrichWithMatterType(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,7 +99,8 @@ export async function GET(request: NextRequest) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   const enriched = await enrichWithMatterType(supabase, data ?? []);
-  return Response.json(enriched);
+  const deduped = deduplicateByMatterNumber(enriched);
+  return Response.json(deduped);
 }
 
 export async function POST(request: NextRequest) {

@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     const isDescriptionRow =
       /^re:/i.test(firstVal) ||
       (firstVal.length > 3 &&
-        !firstVal.match(/^\d+\.\d+\s+[A-Z]\s+/) &&
+        !firstVal.match(/^\d+\.\d+\s+/) &&
         Object.values(row)
           .slice(1)
           .every(v => !v || v.trim() === "" || v.trim() === "0.00" || v.trim() === "0"));
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     saveCurrentIfValid();
 
-    const matterMatch = firstVal.match(/^(\d+\.\d+)\s+[A-Za-z]\s+(.+?)\.?\s*$/);
+    const matterMatch = firstVal.match(/^(\d+\.\d+)\s+(?:[A-Za-z]\s+)?(.+?)\.?\s*$/);
     const matterNumber = matterMatch ? matterMatch[1] : null;
     const clientName = matterMatch
       ? matterMatch[2].replace(/\.$/, "").trim()
@@ -109,6 +109,22 @@ export async function POST(request: NextRequest) {
 
     for (const item of existingItems ?? []) {
       if (item.matter_number) existingById[item.matter_number] = item.id;
+    }
+  }
+
+  // Also look up old-format records where the matter number was stored in client_name
+  // (imported before the regex fix, matter_number column = null)
+  const unmatchedNums = allMatterNumbers.filter(n => !existingById[n]);
+  if (unmatchedNums.length > 0) {
+    const { data: oldItems } = await supabase
+      .from("ar_items")
+      .select("id, client_name")
+      .is("matter_number", null);
+    for (const item of oldItems ?? []) {
+      const m = (item.client_name ?? "").match(/^(\d+\.\d+[A-Za-z\d.]*)\s*$/);
+      if (m && unmatchedNums.includes(m[1])) {
+        existingById[m[1]] = item.id;
+      }
     }
   }
 
