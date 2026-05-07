@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     .from("opportunities")
     .select(`
       *,
-      contact:contacts(id,name,company),
+      contact:contacts!opportunities_contact_id_fkey(id,name,company),
       company:companies(id,name),
       referral_contact:contacts!opportunities_referral_contact_id_fkey(id,name,company)
     `)
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     .insert(body)
     .select(`
       *,
-      contact:contacts(id,name,company),
+      contact:contacts!opportunities_contact_id_fkey(id,name,company),
       company:companies(id,name),
       referral_contact:contacts!opportunities_referral_contact_id_fkey(id,name,company)
     `)

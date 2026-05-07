@@ -15,7 +15,7 @@ export async function PATCH(
     .eq("id", id)
     .select(`
       *,
-      contact:contacts(id,name,company),
+      contact:contacts!opportunities_contact_id_fkey(id,name,company),
       company:companies(id,name),
       referral_contact:contacts!opportunities_referral_contact_id_fkey(id,name,company)
     `)
