@@ -60,6 +60,7 @@ export interface Contact {
 
 export interface Matter {
   id: string;
+  matter_number: string | null;
   title: string;
   client_id: string;
   client?: Contact;

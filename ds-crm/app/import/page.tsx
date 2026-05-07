@@ -44,7 +44,7 @@ const CONFIG: Record<ImportType, {
     description: "Import active matters, prospects, and closed files — contacts must be imported first",
     template: "/templates/matters-template.csv",
     requiredColumns: ["title","client_name"],
-    columns: ["title","client_name","type","status","stage","estimated_fees","opened_date","description"],
+    columns: ["matter_number","title","client_name","type","status","stage","estimated_fees","opened_date","description"],
     typeNote: "type: rezoning, MIH, UAP, 485x, tax_exemption, transaction, litigation, licensing, affordable_housing, other",
   },
   invoices: {

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, DollarSign, Trash2 } from "lucide-react";
+import { Plus, DollarSign, Trash2, Search, ArrowUpDown } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { ContactSearch } from "@/components/ui/contact-search";
 import type { Matter, MatterStatus, MatterType, Contact } from "@/types";
@@ -29,16 +29,16 @@ const statusVariant: Record<MatterStatus, "warning" | "success" | "secondary" | 
 };
 
 const matterTypeLabel: Record<string, string> = {
-  rezoning: "Rezoning",
-  MIH: "MIH",
-  UAP: "UAP",
-  "485x": "485-x",
-  tax_exemption: "Tax Exemption",
-  transaction: "Transaction",
-  litigation: "Litigation",
-  licensing: "Licensing",
-  affordable_housing: "Affordable Housing",
-  other: "Other",
+  rezoning:          "Rezoning",
+  MIH:               "MIH",
+  UAP:               "UAP",
+  "485x":            "485-x",
+  tax_exemption:     "Tax Exemption",
+  transaction:       "Transaction",
+  litigation:        "Litigation",
+  licensing:         "Licensing",
+  affordable_housing:"Affordable Housing",
+  other:             "Other",
 };
 
 const MATTER_TYPES: MatterType[] = [
@@ -47,7 +47,19 @@ const MATTER_TYPES: MatterType[] = [
 
 const PIPELINE_COLS: MatterStatus[] = ["prospect", "active", "on_hold", "closed"];
 
+const SORT_OPTIONS = [
+  { value: "newest",      label: "Newest First" },
+  { value: "oldest",      label: "Oldest First" },
+  { value: "client_az",   label: "Client A → Z" },
+  { value: "client_za",   label: "Client Z → A" },
+  { value: "matter_num",  label: "Matter Number" },
+  { value: "fees_high",   label: "Fees High → Low" },
+  { value: "fees_low",    label: "Fees Low → High" },
+  { value: "opened",      label: "Opened Date" },
+];
+
 interface MatterForm {
+  matter_number: string;
   title: string;
   client_id: string;
   clientName: string;
@@ -60,6 +72,7 @@ interface MatterForm {
 }
 
 const defaultForm: MatterForm = {
+  matter_number: "",
   title: "",
   client_id: "",
   clientName: "",
@@ -71,26 +84,58 @@ const defaultForm: MatterForm = {
   opened_date: "",
 };
 
+function sortMatters(matters: Matter[], sort: string): Matter[] {
+  return [...matters].sort((a, b) => {
+    switch (sort) {
+      case "oldest":    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      case "client_az": return ((a.client as Contact | undefined)?.name ?? "").localeCompare((b.client as Contact | undefined)?.name ?? "");
+      case "client_za": return ((b.client as Contact | undefined)?.name ?? "").localeCompare((a.client as Contact | undefined)?.name ?? "");
+      case "matter_num":return (a.matter_number ?? "").localeCompare(b.matter_number ?? "");
+      case "fees_high": return (b.estimated_fees ?? 0) - (a.estimated_fees ?? 0);
+      case "fees_low":  return (a.estimated_fees ?? 0) - (b.estimated_fees ?? 0);
+      case "opened":    return (b.opened_date ?? "").localeCompare(a.opened_date ?? "");
+      default:          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    }
+  });
+}
 
 export default function MattersPage() {
   const [matters, setMatters] = useState<Matter[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"pipeline" | "list">("pipeline");
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [sort, setSort] = useState("newest");
   const [showDialog, setShowDialog] = useState(false);
   const [editingMatter, setEditingMatter] = useState<Matter | null>(null);
   const [form, setForm] = useState<MatterForm>(defaultForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (q?: string, t?: string) => {
     setLoading(true);
-    const res = await fetch("/api/matters");
+    const params = new URLSearchParams();
+    if (q?.trim()) params.set("search", q.trim());
+    if (t && t !== "all") params.set("type", t);
+    const res = await fetch(`/api/matters?${params}`);
     const data = await res.json();
     setMatters(Array.isArray(data) ? data : []);
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleSearchChange = (v: string) => {
+    setSearch(v);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => load(v, typeFilter), 300);
+  };
+
+  const handleTypeFilter = (t: string) => {
+    setTypeFilter(t);
+    load(search, t);
+  };
 
   const openAdd = () => {
     setEditingMatter(null);
@@ -102,6 +147,7 @@ export default function MattersPage() {
   const openEdit = (matter: Matter) => {
     setEditingMatter(matter);
     setForm({
+      matter_number: matter.matter_number ?? "",
       title: matter.title,
       client_id: matter.client_id,
       clientName: (matter.client as Contact | undefined)?.name ?? "",
@@ -118,34 +164,27 @@ export default function MattersPage() {
 
   const handleSave = async () => {
     if (!form.title.trim()) { setError("Matter title is required."); return; }
-    if (!form.client_id) { setError("Client is required — search and select a contact."); return; }
+    if (!form.client_id)    { setError("Client is required — search and select a contact."); return; }
     setSaving(true);
     const body = {
-      title: form.title.trim(),
-      client_id: form.client_id,
-      type: form.type,
-      status: form.status,
-      stage: form.stage.trim() || null,
-      description: form.description.trim() || null,
+      matter_number:  form.matter_number.trim() || null,
+      title:          form.title.trim(),
+      client_id:      form.client_id,
+      type:           form.type,
+      status:         form.status,
+      stage:          form.stage.trim() || null,
+      description:    form.description.trim() || null,
       estimated_fees: form.estimated_fees ? parseFloat(form.estimated_fees) : null,
-      opened_date: form.opened_date || null,
+      opened_date:    form.opened_date || null,
     };
     const res = editingMatter
-      ? await fetch(`/api/matters/${editingMatter.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        })
-      : await fetch("/api/matters", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+      ? await fetch(`/api/matters/${editingMatter.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      : await fetch("/api/matters",                      { method: "POST",  headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const data = await res.json();
     setSaving(false);
     if (data.error) { setError(data.error); return; }
     setShowDialog(false);
-    load();
+    load(search, typeFilter);
   };
 
   const handleDelete = async () => {
@@ -153,10 +192,11 @@ export default function MattersPage() {
     if (!confirm(`Delete "${editingMatter.title}"? This cannot be undone.`)) return;
     await fetch(`/api/matters/${editingMatter.id}`, { method: "DELETE" });
     setShowDialog(false);
-    load();
+    load(search, typeFilter);
   };
 
-  const byStatus = (status: MatterStatus) => matters.filter(m => m.status === status);
+  const displayed = sortMatters(matters, sort);
+  const byStatus = (status: MatterStatus) => displayed.filter(m => m.status === status);
   const activePipeline = matters
     .filter(m => m.status === "active" || m.status === "prospect")
     .reduce((sum, m) => sum + (m.estimated_fees ?? 0), 0);
@@ -169,10 +209,34 @@ export default function MattersPage() {
       />
 
       <div className="flex-1 p-6 space-y-4">
-        {/* Toolbar */}
-        <div className="flex items-center justify-between">
+        {/* Toolbar row 1 */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[200px] max-w-xs">
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            <Input
+              placeholder="Search matters, clients, matter #..."
+              className="pl-8 h-8 text-xs"
+              value={search}
+              onChange={e => handleSearchChange(e.target.value)}
+            />
+          </div>
+
+          {/* Sort */}
+          <Select value={sort} onValueChange={setSort}>
+            <SelectTrigger className="h-8 w-44 text-xs gap-1">
+              <ArrowUpDown className="h-3 w-3 text-slate-400" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map(o => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* View toggle */}
           <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
-            {(["pipeline", "list"] as const).map((v) => (
+            {(["pipeline", "list"] as const).map(v => (
               <button
                 key={v}
                 onClick={() => setView(v)}
@@ -184,90 +248,114 @@ export default function MattersPage() {
               </button>
             ))}
           </div>
+
           <Button size="sm" onClick={openAdd}>
             <Plus className="h-3.5 w-3.5" />
             New Matter
           </Button>
         </div>
 
+        {/* Type filter chips */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-slate-500">Type:</span>
+          <button
+            onClick={() => handleTypeFilter("all")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              typeFilter === "all" ? "bg-slate-900 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            All
+          </button>
+          {MATTER_TYPES.map(t => (
+            <button
+              key={t}
+              onClick={() => handleTypeFilter(t)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                typeFilter === t ? "bg-slate-900 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {matterTypeLabel[t]}
+            </button>
+          ))}
+        </div>
+
         {loading && (
-          <div className="flex items-center justify-center py-20 text-slate-400 text-sm">
-            Loading matters...
-          </div>
+          <div className="flex items-center justify-center py-20 text-slate-400 text-sm">Loading matters...</div>
         )}
 
         {!loading && matters.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <p className="text-slate-500 font-medium">No matters yet</p>
-            <p className="text-slate-400 text-sm mt-1">Click &quot;New Matter&quot; to add your first matter.</p>
+            <p className="text-slate-500 font-medium">No matters found</p>
+            <p className="text-slate-400 text-sm mt-1">
+              {search || typeFilter !== "all" ? "Try clearing your filters." : "Click \"New Matter\" to add your first matter."}
+            </p>
           </div>
         )}
 
         {/* Pipeline View */}
         {!loading && view === "pipeline" && matters.length > 0 && (
           <div className="grid grid-cols-4 gap-4 min-h-0">
-            {PIPELINE_COLS.map((status) => {
-              const colMatters = byStatus(status);
-              const colTotal = colMatters.reduce((sum, m) => sum + (m.estimated_fees ?? 0), 0);
+            {PIPELINE_COLS.map(status => {
+              const col = byStatus(status);
+              const colTotal = col.reduce((s, m) => s + (m.estimated_fees ?? 0), 0);
               return (
                 <div key={status} className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Badge variant={statusVariant[status]}>{STAGES[status]}</Badge>
-                      <span className="text-xs text-slate-500">{colMatters.length}</span>
+                      <span className="text-xs text-slate-500">{col.length}</span>
                     </div>
                     {colTotal > 0 && (
                       <span className="text-xs font-medium text-slate-600">{formatCurrency(colTotal)}</span>
                     )}
                   </div>
                   <div className="space-y-2">
-                    {colMatters.map((matter) => (
-                      <Card
-                        key={matter.id}
-                        className="cursor-pointer hover:shadow-md transition-shadow"
-                        onClick={() => openEdit(matter)}
-                      >
-                        <CardContent className="p-3">
-                          <p className="text-sm font-medium text-slate-900 leading-snug">{matter.title}</p>
-                          {(matter.client as Contact | undefined)?.name && (
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              {(matter.client as Contact).name}
-                              {(matter.client as Contact).company && ` · ${(matter.client as Contact).company}`}
-                            </p>
-                          )}
-                          <div className="mt-1 flex items-center gap-1">
-                            <Badge variant="secondary" className="text-[10px] px-1.5">
-                              {matterTypeLabel[matter.type] ?? matter.type}
-                            </Badge>
-                          </div>
-                          {matter.stage && (
-                            <p className="mt-1.5 text-xs text-slate-500">{matter.stage}</p>
-                          )}
-                          {matter.estimated_fees && matter.estimated_fees > 0 && (
-                            <div className="mt-2 flex items-center gap-1 text-xs text-slate-500">
-                              <DollarSign className="h-3 w-3" />
-                              {formatCurrency(matter.estimated_fees)} est.
-                            </div>
-                          )}
-                          {(matter.fees_billed ?? 0) > 0 && (
-                            <div className="mt-1">
-                              <div className="h-1 w-full rounded-full bg-slate-100">
-                                <div
-                                  className="h-1 rounded-full bg-green-500"
-                                  style={{
-                                    width: `${Math.min(100, ((matter.fees_collected ?? 0) / (matter.fees_billed || 1)) * 100)}%`,
-                                  }}
-                                />
-                              </div>
-                              <p className="mt-0.5 text-[10px] text-slate-400">
-                                {formatCurrency(matter.fees_collected ?? 0)} / {formatCurrency(matter.fees_billed ?? 0)} billed
+                    {col.map(matter => {
+                      const client = matter.client as Contact | undefined;
+                      return (
+                        <Card key={matter.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => openEdit(matter)}>
+                          <CardContent className="p-3">
+                            {matter.matter_number && (
+                              <p className="text-[10px] font-mono text-slate-400 mb-0.5">{matter.matter_number}</p>
+                            )}
+                            <p className="text-sm font-medium text-slate-900 leading-snug">{matter.title}</p>
+                            {client?.name && (
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {client.name}{client.company && ` · ${client.company}`}
                               </p>
+                            )}
+                            <div className="mt-1 flex items-center gap-1 flex-wrap">
+                              <Badge variant="secondary" className="text-[10px] px-1.5">
+                                {matterTypeLabel[matter.type] ?? matter.type}
+                              </Badge>
                             </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
-                    {colMatters.length === 0 && (
+                            {matter.stage && (
+                              <p className="mt-1.5 text-xs text-slate-500">{matter.stage}</p>
+                            )}
+                            {(matter.estimated_fees ?? 0) > 0 && (
+                              <div className="mt-2 flex items-center gap-1 text-xs text-slate-500">
+                                <DollarSign className="h-3 w-3" />
+                                {formatCurrency(matter.estimated_fees!)} est.
+                              </div>
+                            )}
+                            {(matter.fees_billed ?? 0) > 0 && (
+                              <div className="mt-1">
+                                <div className="h-1 w-full rounded-full bg-slate-100">
+                                  <div
+                                    className="h-1 rounded-full bg-green-500"
+                                    style={{ width: `${Math.min(100, ((matter.fees_collected ?? 0) / (matter.fees_billed || 1)) * 100)}%` }}
+                                  />
+                                </div>
+                                <p className="mt-0.5 text-[10px] text-slate-400">
+                                  {formatCurrency(matter.fees_collected ?? 0)} / {formatCurrency(matter.fees_billed ?? 0)} billed
+                                </p>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                    {col.length === 0 && (
                       <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center">
                         <p className="text-xs text-slate-400">No {STAGES[status].toLowerCase()} matters</p>
                       </div>
@@ -286,45 +374,53 @@ export default function MattersPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Matter #</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Matter</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Client</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Type</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Stage</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Opened</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500">Est. Fees</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500">Collected</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {matters.map((matter) => (
-                    <tr
-                      key={matter.id}
-                      className="hover:bg-slate-50 cursor-pointer"
-                      onClick={() => openEdit(matter)}
-                    >
-                      <td className="px-4 py-3 font-medium text-slate-900">{matter.title}</td>
-                      <td className="px-4 py-3 text-slate-500 text-xs">
-                        {(matter.client as Contact | undefined)?.name ?? "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant="secondary" className="text-[10px]">
-                          {matterTypeLabel[matter.type] ?? matter.type}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant={statusVariant[matter.status]} className="text-[10px]">
-                          {STAGES[matter.status]}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-slate-500">{matter.stage ?? "—"}</td>
-                      <td className="px-4 py-3 text-right text-slate-700">
-                        {matter.estimated_fees ? formatCurrency(matter.estimated_fees) : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right text-green-700 font-medium">
-                        {matter.fees_collected ? formatCurrency(matter.fees_collected) : "—"}
-                      </td>
-                    </tr>
-                  ))}
+                  {displayed.map(matter => {
+                    const client = matter.client as Contact | undefined;
+                    return (
+                      <tr key={matter.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => openEdit(matter)}>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-400 whitespace-nowrap">
+                          {matter.matter_number ?? "—"}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-slate-900">{matter.title}</td>
+                        <td className="px-4 py-3 text-slate-500 text-xs">
+                          {client?.name ?? "—"}
+                          {client?.company && <span className="text-slate-400"> · {client.company}</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant="secondary" className="text-[10px]">
+                            {matterTypeLabel[matter.type] ?? matter.type}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={statusVariant[matter.status]} className="text-[10px]">
+                            {STAGES[matter.status]}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500 text-xs">{matter.stage ?? "—"}</td>
+                        <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
+                          {matter.opened_date ?? "—"}
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-700">
+                          {matter.estimated_fees ? formatCurrency(matter.estimated_fees) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-right text-green-700 font-medium">
+                          {matter.fees_collected ? formatCurrency(matter.fees_collected) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -339,6 +435,27 @@ export default function MattersPage() {
             <DialogTitle>{editingMatter ? "Edit Matter" : "New Matter"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="matter_number">Matter Number</Label>
+                <Input
+                  id="matter_number"
+                  value={form.matter_number}
+                  onChange={e => setForm(f => ({ ...f, matter_number: e.target.value }))}
+                  placeholder="e.g. 16774.0004"
+                  className="font-mono"
+                />
+              </div>
+              <div>
+                <Label htmlFor="opened_date">Opened Date</Label>
+                <Input
+                  id="opened_date"
+                  type="date"
+                  value={form.opened_date}
+                  onChange={e => setForm(f => ({ ...f, opened_date: e.target.value }))}
+                />
+              </div>
+            </div>
             <div>
               <Label htmlFor="title">Matter Title *</Label>
               <Input
@@ -403,15 +520,6 @@ export default function MattersPage() {
               </div>
             </div>
             <div>
-              <Label htmlFor="opened_date">Opened Date</Label>
-              <Input
-                id="opened_date"
-                type="date"
-                value={form.opened_date}
-                onChange={e => setForm(f => ({ ...f, opened_date: e.target.value }))}
-              />
-            </div>
-            <div>
               <Label htmlFor="description">Description / Notes</Label>
               <Textarea
                 id="description"
@@ -429,9 +537,7 @@ export default function MattersPage() {
                 <Trash2 className="h-3.5 w-3.5" />
                 Delete
               </Button>
-            ) : (
-              <span />
-            )}
+            ) : <span />}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
               <Button onClick={handleSave} disabled={saving}>

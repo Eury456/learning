@@ -77,6 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { error } = await supabase.from("matters").insert({
+      matter_number:  row.matter_number?.trim() || null,
       title:          row.title.trim(),
       client_id:      clientId,
       type:           validTypes.includes(row.type?.trim()) ? row.type.trim() : "other",

@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Trash2, MapPin, Building, User } from "lucide-react";
+import { Plus, Search, Trash2, MapPin, Building, User, RefreshCw } from "lucide-react";
 import { ContactSearch } from "@/components/ui/contact-search";
 import type { Contact } from "@/types";
 
@@ -224,6 +224,21 @@ export default function ProjectsPage() {
     setShowDialog(true);
   };
 
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ created: number; skipped: number } | null>(null);
+
+  const handleSyncFromMatters = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    const res = await fetch("/api/projects/sync-from-matters", { method: "POST" });
+    const data = await res.json();
+    setSyncing(false);
+    if (!data.error) {
+      setSyncResult({ created: data.created, skipped: data.skipped });
+      load();
+    }
+  };
+
   const addCustomProgram = () => {
     const prog = form.custom_program.trim();
     if (!prog || form.zoning_programs.includes(prog)) { setForm(f => ({ ...f, custom_program: "" })); return; }
@@ -292,10 +307,16 @@ export default function ProjectsPage() {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
-          <Button size="sm" onClick={openAdd}>
-            <Plus className="h-3.5 w-3.5" />
-            New Project
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={handleSyncFromMatters} disabled={syncing}>
+              <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Syncing..." : "Sync from Matters"}
+            </Button>
+            <Button size="sm" onClick={openAdd}>
+              <Plus className="h-3.5 w-3.5" />
+              New Project
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -336,6 +357,16 @@ export default function ProjectsPage() {
             ))}
           </div>
         </div>
+
+        {syncResult && (
+          <div className="rounded-lg bg-green-50 border border-green-100 p-3 flex items-center justify-between">
+            <p className="text-xs font-medium text-green-700">
+              &#10003; Sync complete — {syncResult.created} project{syncResult.created !== 1 ? "s" : ""} created from Matters
+              {syncResult.skipped > 0 && `, ${syncResult.skipped} already existed`}.
+            </p>
+            <button onClick={() => setSyncResult(null)} className="text-green-400 hover:text-green-600 text-xs ml-4">✕</button>
+          </div>
+        )}
 
         {loading && (
           <div className="flex items-center justify-center py-20 text-slate-400 text-sm">Loading...</div>
