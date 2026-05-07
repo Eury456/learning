@@ -1,6 +1,33 @@
 import { getServiceClient } from "@/lib/supabase";
 import { NextRequest } from "next/server";
 
+// Merge matter type from matters table by matter_number (text join, no FK needed).
+async function enrichWithMatterType(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows: any[]
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any[]> {
+  const nums = rows.map(r => r.matter_number).filter(Boolean);
+  if (nums.length === 0) return rows;
+
+  const { data: matters } = await supabase
+    .from("matters")
+    .select("matter_number, type")
+    .in("matter_number", nums);
+
+  const typeMap: Record<string, string> = {};
+  for (const m of matters ?? []) {
+    if (m.matter_number) typeMap[m.matter_number] = m.type;
+  }
+
+  return rows.map(r => ({
+    ...r,
+    matter_type: r.matter_number ? (typeMap[r.matter_number] ?? null) : null,
+  }));
+}
+
 export async function GET(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const supabase = getServiceClient() as any;
@@ -17,8 +44,6 @@ export async function GET(request: NextRequest) {
     return q;
   };
 
-  // Attempt to join contact — requires schema migration (ar-detail-schema.sql).
-  // Falls back to plain select if the FK doesn't exist yet.
   let { data, error } = await addFilters(
     supabase
       .from("ar_items")
@@ -36,7 +61,9 @@ export async function GET(request: NextRequest) {
   }
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
-  return Response.json(data);
+
+  const enriched = await enrichWithMatterType(supabase, data ?? []);
+  return Response.json(enriched);
 }
 
 export async function POST(request: NextRequest) {

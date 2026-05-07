@@ -25,6 +25,7 @@ interface ARItem {
   matter_number: string | null;
   client_name: string;
   matter_description: string | null;
+  matter_type: string | null;
   days_0_27: number;
   days_28_60: number;
   days_61_90: number;
@@ -76,6 +77,32 @@ interface ARInvoice {
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
+
+const MATTER_TYPE_LABEL: Record<string, string> = {
+  rezoning:           "Rezoning",
+  MIH:                "MIH",
+  UAP:                "UAP",
+  "485x":             "485-x",
+  tax_exemption:      "Tax Exemption",
+  transaction:        "Transaction",
+  litigation:         "Litigation",
+  licensing:          "Licensing",
+  affordable_housing: "Affordable Housing",
+  other:              "Other",
+};
+
+const MATTER_TYPE_COLOR: Record<string, string> = {
+  rezoning:           "bg-blue-100 text-blue-700",
+  MIH:                "bg-purple-100 text-purple-700",
+  UAP:                "bg-indigo-100 text-indigo-700",
+  "485x":             "bg-cyan-100 text-cyan-700",
+  tax_exemption:      "bg-teal-100 text-teal-700",
+  transaction:        "bg-green-100 text-green-700",
+  litigation:         "bg-red-100 text-red-700",
+  licensing:          "bg-orange-100 text-orange-700",
+  affordable_housing: "bg-amber-100 text-amber-700",
+  other:              "bg-slate-100 text-slate-600",
+};
 
 const SORT_OPTIONS = [
   { value: "amount_desc",  label: "Largest Amount" },
@@ -590,24 +617,32 @@ export default function CollectionsPage() {
                       className={`cursor-pointer transition-all ${priorityBorder[priority]} ${isSelected ? "ring-2 ring-slate-900 bg-slate-50" : "hover:shadow-md"}`}
                       onClick={() => selectItem(item)}>
                       <CardContent className="p-3 space-y-0.5">
-                        {/* Row 1: matter number */}
-                        {matterNum && (
-                          <p className="text-[10px] text-slate-400 font-mono">{matterNum}</p>
-                        )}
-                        {/* Row 2: client name — biggest, boldest */}
+                        {/* Row 1: matter number + matter type badge */}
+                        <div className="flex items-center justify-between gap-1">
+                          {matterNum
+                            ? <p className="text-[10px] text-slate-400 font-mono">{matterNum}</p>
+                            : <span />
+                          }
+                          {item.matter_type && (
+                            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${MATTER_TYPE_COLOR[item.matter_type] ?? "bg-slate-100 text-slate-600"}`}>
+                              {MATTER_TYPE_LABEL[item.matter_type] ?? item.matter_type}
+                            </span>
+                          )}
+                        </div>
+                        {/* Row 2: client name */}
                         <div className="flex items-start justify-between gap-2">
                           <p className="text-sm font-bold text-slate-900 leading-snug">
                             {clientName || <span className="text-slate-400 italic">Unknown client</span>}
                           </p>
                           <ChevronRight className="h-4 w-4 text-slate-300 shrink-0 mt-0.5" />
                         </div>
-                        {/* Row 3: property address + matter type (from description) */}
+                        {/* Row 3: property address (from matter description / RE: line) */}
                         {description ? (
                           <p className="text-[11px] text-blue-700 font-medium leading-snug line-clamp-2">
                             {description.replace(/^re:\s*/i, "")}
                           </p>
                         ) : (
-                          <p className="text-[11px] text-slate-300 italic">No description</p>
+                          <p className="text-[11px] text-slate-300 italic">No address on file</p>
                         )}
                         {/* Row 4: status + aging + balance */}
                         <div className="pt-1 flex items-center justify-between">
@@ -664,7 +699,13 @@ export default function CollectionsPage() {
                         <p className="text-xl font-bold text-slate-900 leading-tight">
                           {clientName || <span className="text-slate-400 italic text-base">Unknown client</span>}
                         </p>
-                        {/* Property address + matter type */}
+                        {/* Matter type badge */}
+                        {selected.matter_type && (
+                          <span className={`mt-1 inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full ${MATTER_TYPE_COLOR[selected.matter_type] ?? "bg-slate-100 text-slate-600"}`}>
+                            {MATTER_TYPE_LABEL[selected.matter_type] ?? selected.matter_type}
+                          </span>
+                        )}
+                        {/* Property address */}
                         {description && (
                           <p className="text-sm font-medium text-blue-700 mt-1">
                             {description.replace(/^re:\s*/i, "")}
